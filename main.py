@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from langchain_chroma import Chroma
+from langchain_core.prompts import PromptTemplate
 from langchain_community.document_loaders import (
     Docx2txtLoader,
     PyPDFLoader,
@@ -21,9 +22,19 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 ROOT = Path(__file__).resolve().parent
 SUPPORTED = {".pdf", ".docx", ".xls", ".xlsx", ".xlsm", ".csv", ".txt", ".md"}
+PROMPT = PromptTemplate(
+    input_variables=["context", "question"],
+    template="""Answer using only the context below.
+If it does not answer the question, say so.
+Do not invent facts. Be concise and helpful.
+
+Context:
+{context}
+
+Question: {question}"""
+)
 
 
-# 1. LOAD DOCUMENTS method to read the documents from the specified directory and its subdirectories, using the appropriate loader for each file type.
 def load_file(path: Path) -> list[Document]:
     """Load one supported file through the appropriate LangChain document loader."""
     ext = path.suffix.lower()
@@ -56,9 +67,8 @@ def find_document_files(documents_dir: Path) -> list[Path]:
         if path.is_file() and path.suffix.lower() in SUPPORTED
     )
 
-# Load all supported documents and continue when an individual file cannot be read.
+# 1. Load all supported documents and continue when an individual file cannot be read
 def load_documents(documents_dir: Path) -> list[Document]:
-    """Load all supported documents and continue when an individual file cannot be read."""
     documents: list[Document] = []
     for path in find_document_files(documents_dir):
         try:
@@ -72,7 +82,6 @@ def load_documents(documents_dir: Path) -> list[Document]:
 
 # 2. SPLIT INTO CHUNKS
 def split_documents(documents: list[Document]) -> list[Document]:
-    """Split loaded content into overlapping chunks suitable for semantic retrieval."""
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
     return splitter.split_documents(documents)
 
@@ -164,14 +173,14 @@ def answer(question: str, database_dir: Path, model: str, embedding_model: str, 
     documents = get_retriever(database_dir, embedding_model, top_k).invoke(question)
     if not documents:
         return "No relevant content was found in the index.", []
-    prompt = f"""Answer using only the context below. If it does not answer the question, say so.
-Do not invent facts. Be concise and helpful.
 
-Context:
-{format_context(documents)}
+    # Format the context and apply the prompt template
+    context = format_context(documents)
+    prompt = PROMPT.format(context=context, question=question)
 
-Question: {question}"""
+    # Query the LLM
     response = get_llm(model).invoke(prompt)
+
     return str(response.content), format_sources(documents)
 
 
